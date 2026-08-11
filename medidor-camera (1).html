@@ -20,14 +20,75 @@
     flex: 1;
     overflow: hidden;
     background: #000;
+    min-height: 280px;
   }
-  video, canvas#overlay {
+  video, img#capturedPhoto, canvas#overlay {
     position: absolute;
     top: 0; left: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
+  img#capturedPhoto { display: none; }
+
+  /* Botão de capturar foto */
+  #captureBar {
+    position: absolute;
+    bottom: 24px;
+    left: 0; right: 0;
+    display: none;
+    justify-content: center;
+    z-index: 6;
+  }
+  #captureBtn {
+    width: 74px;
+    height: 74px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.95);
+    border: 5px solid #2563eb;
+    font-size: 32px;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #captureBtn:active { transform: scale(0.92); }
+
+  /* Botão refazer foto */
+  #retakeBtn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 6;
+    padding: 9px 16px;
+    border-radius: 22px;
+    background: rgba(15,23,42,0.8);
+    color: #f1f5f9;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid #475569;
+    cursor: pointer;
+    display: none;
+    backdrop-filter: blur(4px);
+  }
+
+  /* Flash ao capturar */
+  #flash {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 7;
+  }
+  #flash.active { animation: flashAnim 0.35s ease-out; }
+  @keyframes flashAnim {
+    0% { opacity: 0.85; }
+    100% { opacity: 0; }
+  }
+
   #ui {
     padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
     background: #111827;
@@ -45,23 +106,9 @@
     justify-content: space-between;
     align-items: center;
   }
-  #clientBadge {
-    font-size: 12px;
-    color: #93c5fd;
-    font-weight: 500;
-  }
-  .step-label {
-    font-size: 14px;
-    color: #93c5fd;
-    margin-bottom: 8px;
-    font-weight: 500;
-  }
-  .hint {
-    font-size: 12.5px;
-    color: #94a3b8;
-    margin-bottom: 12px;
-    line-height: 1.4;
-  }
+  #clientBadge { font-size: 12px; color: #93c5fd; font-weight: 500; }
+  .step-label { font-size: 14px; color: #93c5fd; margin-bottom: 8px; font-weight: 500; }
+  .hint { font-size: 12.5px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4; }
   select, input[type=number], input[type=text] {
     width: 100%;
     padding: 10px;
@@ -86,12 +133,7 @@
   .secondary { background: #334155; color: #f1f5f9; }
   .danger { background: #7f1d1d; color: #fecaca; }
   button:disabled { opacity: 0.4; }
-  .result-box {
-    background: #1e293b;
-    border-radius: 10px;
-    padding: 14px;
-    margin-bottom: 12px;
-  }
+  .result-box { background: #1e293b; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
   .result-row {
     display: flex;
     justify-content: space-between;
@@ -110,12 +152,7 @@
     margin-bottom: 12px;
     line-height: 1.4;
   }
-  .item-card {
-    background: #1e293b;
-    border-radius: 10px;
-    padding: 12px;
-    margin-bottom: 8px;
-  }
+  .item-card { background: #1e293b; border-radius: 10px; padding: 12px; margin-bottom: 8px; }
   .item-card .title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
   .item-card .sub { font-size: 12.5px; color: #94a3b8; }
   #startScreen {
@@ -153,10 +190,18 @@
 
 <div id="stage">
   <video id="video" autoplay playsinline muted></video>
+  <img id="capturedPhoto" alt="">
   <canvas id="overlay"></canvas>
+  <div id="flash"></div>
+
+  <div id="captureBar">
+    <button id="captureBtn" onclick="capturePhoto()">📸</button>
+  </div>
+  <button id="retakeBtn" onclick="retakePhoto()">↩️ Tirar outra foto</button>
+
   <div id="startScreen">
     <div style="font-size:40px;">📷</div>
-    <p>Toque para ativar a câmera. Você vai calibrar com um objeto de tamanho conhecido antes de medir.</p>
+    <p>Toque para ativar a câmera. Você vai tirar uma <b>foto</b> da janela com um objeto de referência ao lado e medir em cima dela.</p>
     <button class="primary" onclick="startCamera()">Ativar câmera</button>
   </div>
 </div>
@@ -174,9 +219,14 @@
     <button class="primary" onclick="startMeasurement()">Iniciar medição</button>
   </div>
 
+  <div id="captureHintStep" style="display:none;">
+    <div class="step-label">Etapa 1 · Foto</div>
+    <div class="hint">Enquadre a janela com o objeto de referência encostado ao lado (mesma distância da câmera). Toque no botão 📸 para tirar a foto.</div>
+  </div>
+
   <div id="calibStep" style="display:none;">
-    <div class="step-label">Etapa 1 · Calibração</div>
-    <div class="hint">Encoste o objeto de referência na parede, ao lado do que vai medir (mesma distância da câmera). Escolha o objeto:</div>
+    <div class="step-label">Etapa 2 · Calibração na foto</div>
+    <div class="hint">Toque nas duas pontas do objeto de referência na foto.</div>
     <select id="refObject">
       <option value="21">Folha A4 — largura (21 cm)</option>
       <option value="29.7">Folha A4 — altura (29,7 cm)</option>
@@ -184,7 +234,6 @@
       <option value="custom">Outro (informar medida)</option>
     </select>
     <input type="number" id="customRef" placeholder="Medida em cm" style="display:none;">
-    <div class="hint">Toque nas duas pontas do objeto na tela.</div>
     <div class="row">
       <button class="secondary" onclick="undoPoint()">Desfazer ponto</button>
       <button class="primary" id="confirmCalib" disabled onclick="confirmCalibration()">Confirmar calibração</button>
@@ -192,7 +241,7 @@
   </div>
 
   <div id="measureStep" style="display:none;">
-    <div class="step-label" id="measureLabel">Etapa 2 · Marque a LARGURA (2 pontos)</div>
+    <div class="step-label" id="measureLabel">Etapa 3 · Marque a LARGURA (2 pontos)</div>
     <div class="hint">Toque nas duas extremidades da medida que quer capturar.</div>
     <div class="row">
       <button class="secondary" onclick="undoPoint()">Desfazer ponto</button>
@@ -246,7 +295,7 @@ const ctx = overlay.getContext('2d');
 let points = [];
 let scalePxPerCm = null;
 let widthCm = null, heightCm = null;
-let stage = 'calib';
+let stage = 'capture';
 
 let currentClient = '';
 let currentLabel = '';
@@ -277,11 +326,17 @@ document.getElementById('refObject').addEventListener('change', (e) => {
 });
 
 async function startCamera() {
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
     });
     video.srcObject = stream;
+    video.style.display = 'block';
+    document.getElementById('capturedPhoto').style.display = 'none';
     document.getElementById('startScreen').style.display = 'none';
     resizeOverlay();
   } catch (err) {
@@ -295,6 +350,69 @@ function resizeOverlay() {
   draw();
 }
 window.addEventListener('resize', resizeOverlay);
+
+/* ---------- CAPTURA DE FOTO ---------- */
+function showCaptureUI() {
+  document.getElementById('captureBar').style.display = 'flex';
+}
+function hideCaptureUI() {
+  document.getElementById('captureBar').style.display = 'none';
+}
+
+function capturePhoto() {
+  if (!video.srcObject || video.videoWidth === 0) return;
+
+  // Efeito de flash
+  const flash = document.getElementById('flash');
+  flash.classList.remove('active');
+  void flash.offsetWidth;
+  flash.classList.add('active');
+
+  // Captura o frame atual para uma imagem
+  const img = document.getElementById('capturedPhoto');
+  const capCanvas = document.createElement('canvas');
+  capCanvas.width = video.videoWidth;
+  capCanvas.height = video.videoHeight;
+  capCanvas.getContext('2d').drawImage(video, 0, 0);
+  img.src = capCanvas.toDataURL('image/jpeg', 0.92);
+
+  // Para a câmera
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+
+  // Mostra a foto no lugar do vídeo
+  video.style.display = 'none';
+  img.style.display = 'block';
+
+  hideCaptureUI();
+  document.getElementById('retakeBtn').style.display = 'block';
+
+  // Vai para calibração
+  document.getElementById('captureHintStep').style.display = 'none';
+  document.getElementById('calibStep').style.display = 'block';
+  stage = 'calib';
+  points = [];
+  draw();
+  resizeOverlay();
+}
+
+function retakePhoto() {
+  points = [];
+  scalePxPerCm = null;
+  draw();
+
+  document.getElementById('calibStep').style.display = 'none';
+  document.getElementById('measureStep').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = 'none';
+
+  startCamera();
+  showCaptureUI();
+  document.getElementById('captureHintStep').style.display = 'block';
+  stage = 'capture';
+}
+/* ------------------------------------- */
 
 overlay.addEventListener('click', (e) => {
   if (stage !== 'calib' && stage !== 'measureWidth' && stage !== 'measureHeight') return;
@@ -368,10 +486,24 @@ function startMeasurement() {
 
   document.getElementById('clientBadge').textContent = '👤 ' + name;
   document.getElementById('clientStep').style.display = 'none';
-  document.getElementById('calibStep').style.display = 'block';
-  stage = 'calib';
+
+  // Reseta estado de medição
   points = [];
+  scalePxPerCm = null;
+  widthCm = null;
+  heightCm = null;
   draw();
+
+  // Garante câmera ativa e mostra botão de captura
+  if (!video.srcObject) {
+    startCamera();
+  } else {
+    video.style.display = 'block';
+    document.getElementById('capturedPhoto').style.display = 'none';
+  }
+  showCaptureUI();
+  document.getElementById('captureHintStep').style.display = 'block';
+  stage = 'capture';
 }
 
 function confirmCalibration() {
@@ -385,7 +517,7 @@ function confirmCalibration() {
   stage = 'measureWidth';
   document.getElementById('calibStep').style.display = 'none';
   document.getElementById('measureStep').style.display = 'block';
-  document.getElementById('measureLabel').textContent = 'Etapa 2 · Marque a LARGURA (2 pontos)';
+  document.getElementById('measureLabel').textContent = 'Etapa 3 · Marque a LARGURA (2 pontos)';
   updateConfirmButtons();
 }
 
@@ -396,7 +528,7 @@ function confirmMeasureStep() {
     points = [];
     draw();
     stage = 'measureHeight';
-    document.getElementById('measureLabel').textContent = 'Etapa 3 · Marque a ALTURA (2 pontos)';
+    document.getElementById('measureLabel').textContent = 'Etapa 4 · Marque a ALTURA (2 pontos)';
     updateConfirmButtons();
   } else if (stage === 'measureHeight') {
     heightCm = dist;
@@ -428,17 +560,24 @@ function pushCurrentItem() {
   });
 }
 
+function clearStageForClient() {
+  document.getElementById('capturedPhoto').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = 'none';
+  hideCaptureUI();
+}
+
 function saveItemAndMeasureAnother() {
   pushCurrentItem();
   widthCm = null; heightCm = null;
   points = [];
   scalePxPerCm = null;
-  stage = 'calib';
+  stage = 'capture';
   document.getElementById('resultStep').style.display = 'none';
   document.getElementById('clientStep').style.display = 'block';
   document.getElementById('itemLabel').value = '';
   document.getElementById('existingClients').value = currentClient;
   document.getElementById('newClientName').style.display = 'none';
+  clearStageForClient();
   draw();
 }
 
@@ -463,15 +602,18 @@ function resetAll() {
   widthCm = null; heightCm = null;
   currentClient = ''; currentLabel = '';
   projectItems = [];
-  stage = 'calib';
+  stage = 'capture';
   document.getElementById('fichaStep').style.display = 'none';
   document.getElementById('resultStep').style.display = 'none';
   document.getElementById('measureStep').style.display = 'none';
+  document.getElementById('calibStep').style.display = 'none';
+  document.getElementById('captureHintStep').style.display = 'none';
   document.getElementById('clientStep').style.display = 'block';
   document.getElementById('clientBadge').textContent = '';
   document.getElementById('itemLabel').value = '';
   document.getElementById('newClientName').value = '';
   document.getElementById('existingClients').value = '';
+  clearStageForClient();
   loadClients();
   draw();
 }
