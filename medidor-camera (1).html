@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Medidor por Câmera</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, system-ui, sans-serif;
+    background: #0f172a;
+    color: #f1f5f9;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  #stage {
+    position: relative;
+    width: 100%;
+    flex: 1;
+    overflow: hidden;
+    background: #000;
+  }
+  video, canvas#overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  #ui {
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+    background: #111827;
+    border-top: 1px solid #1f2937;
+    max-height: 55vh;
+    overflow-y: auto;
+  }
+  h1 {
+    font-size: 15px;
+    font-weight: 600;
+    padding: 12px 16px;
+    background: #111827;
+    border-bottom: 1px solid #1f2937;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #clientBadge {
+    font-size: 12px;
+    color: #93c5fd;
+    font-weight: 500;
+  }
+  .step-label {
+    font-size: 14px;
+    color: #93c5fd;
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  .hint {
+    font-size: 12.5px;
+    color: #94a3b8;
+    margin-bottom: 12px;
+    line-height: 1.4;
+  }
+  select, input[type=number], input[type=text] {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: #1e293b;
+    color: #f1f5f9;
+    font-size: 15px;
+    margin-bottom: 10px;
+  }
+  .row { display: flex; gap: 8px; }
+  button {
+    flex: 1;
+    padding: 13px;
+    border-radius: 8px;
+    border: none;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .primary { background: #2563eb; color: white; }
+  .secondary { background: #334155; color: #f1f5f9; }
+  .danger { background: #7f1d1d; color: #fecaca; }
+  button:disabled { opacity: 0.4; }
+  .result-box {
+    background: #1e293b;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .result-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 14px;
+    border-bottom: 1px solid #334155;
+  }
+  .result-row:last-child { border-bottom: none; }
+  .result-row .val { font-weight: 700; color: #60a5fa; }
+  .warn {
+    background: #422006;
+    color: #fbbf24;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    margin-bottom: 12px;
+    line-height: 1.4;
+  }
+  .item-card {
+    background: #1e293b;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+  .item-card .title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .item-card .sub { font-size: 12.5px; color: #94a3b8; }
+  #startScreen {
+    position: absolute;
+    inset: 0;
+    background: #0f172a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+    z-index: 10;
+  }
+  #startScreen p { color: #94a3b8; font-size: 14px; margin: 10px 0 20px; line-height: 1.5; }
+  #startScreen button { max-width: 240px; }
+
+  #fichaSheet { display: none; }
+  @media print {
+    #stage, h1, #ui > *:not(#fichaStep) { display: none !important; }
+    #fichaStep { display: block !important; }
+    body { background: #fff; color: #000; }
+    #fichaSheet { display: block !important; }
+    .item-card { background: #fff; border: 1px solid #ccc; color: #000; }
+    .item-card .sub { color: #444; }
+  }
+</style>
+</head>
+<body>
+
+<h1>
+  <span>📐 Medidor por Câmera</span>
+  <span id="clientBadge"></span>
+</h1>
+
+<div id="stage">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+  <div id="startScreen">
+    <div style="font-size:40px;">📷</div>
+    <p>Toque para ativar a câmera. Você vai calibrar com um objeto de tamanho conhecido antes de medir.</p>
+    <button class="primary" onclick="startCamera()">Ativar câmera</button>
+  </div>
+</div>
+
+<div id="ui">
+
+  <div id="clientStep">
+    <div class="step-label">Orçamento · Cliente</div>
+    <div class="hint">Escolha um cliente existente ou cadastre um novo antes de medir.</div>
+    <select id="existingClients" onchange="onClientSelectChange()">
+      <option value="">— Novo cliente —</option>
+    </select>
+    <input type="text" id="newClientName" placeholder="Nome do cliente">
+    <input type="text" id="itemLabel" placeholder="O que vai medir? (ex: Janela sala)">
+    <button class="primary" onclick="startMeasurement()">Iniciar medição</button>
+  </div>
+
+  <div id="calibStep" style="display:none;">
+    <div class="step-label">Etapa 1 · Calibração</div>
+    <div class="hint">Encoste o objeto de referência na parede, ao lado do que vai medir (mesma distância da câmera). Escolha o objeto:</div>
+    <select id="refObject">
+      <option value="21">Folha A4 — largura (21 cm)</option>
+      <option value="29.7">Folha A4 — altura (29,7 cm)</option>
+      <option value="8.56">Cartão (crédito/banco) — largura (8,56 cm)</option>
+      <option value="custom">Outro (informar medida)</option>
+    </select>
+    <input type="number" id="customRef" placeholder="Medida em cm" style="display:none;">
+    <div class="hint">Toque nas duas pontas do objeto na tela.</div>
+    <div class="row">
+      <button class="secondary" onclick="undoPoint()">Desfazer ponto</button>
+      <button class="primary" id="confirmCalib" disabled onclick="confirmCalibration()">Confirmar calibração</button>
+    </div>
+  </div>
+
+  <div id="measureStep" style="display:none;">
+    <div class="step-label" id="measureLabel">Etapa 2 · Marque a LARGURA (2 pontos)</div>
+    <div class="hint">Toque nas duas extremidades da medida que quer capturar.</div>
+    <div class="row">
+      <button class="secondary" onclick="undoPoint()">Desfazer ponto</button>
+      <button class="primary" id="confirmMeasure" disabled onclick="confirmMeasureStep()">Confirmar</button>
+    </div>
+  </div>
+
+  <div id="resultStep" style="display:none;">
+    <div class="warn">⚠️ Medida estimada por câmera. Use para orçamento — confira fisicamente antes de cortar/fabricar.</div>
+    <div class="result-box">
+      <div class="result-row"><span>Largura capturada</span><span class="val" id="rWidth">-</span></div>
+      <div class="result-row"><span>Altura capturada</span><span class="val" id="rHeight">-</span></div>
+      <div class="result-row"><span>Área</span><span class="val" id="rArea">-</span></div>
+    </div>
+    <div class="step-label">Margem de tolerância</div>
+    <select id="tolerance" onchange="renderResults()">
+      <option value="0">Sem ajuste</option>
+      <option value="2" selected>+2 cm</option>
+      <option value="3">+3 cm</option>
+      <option value="5">+5 cm</option>
+    </select>
+    <div class="result-box">
+      <div class="result-row"><span>Largura p/ orçamento</span><span class="val" id="fWidth">-</span></div>
+      <div class="result-row"><span>Altura p/ orçamento</span><span class="val" id="fHeight">-</span></div>
+    </div>
+    <div class="row">
+      <button class="secondary" onclick="saveItemAndMeasureAnother()">Salvar e medir outra</button>
+      <button class="primary" onclick="saveItemAndFinish()">Salvar e finalizar</button>
+    </div>
+  </div>
+
+  <div id="fichaStep" style="display:none;">
+    <div id="fichaSheet">
+      <div class="step-label" id="fichaClientName">Ficha de Medição</div>
+      <div class="hint" id="fichaDate"></div>
+      <div id="fichaItems"></div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="secondary" onclick="resetAll()">Novo orçamento</button>
+      <button class="primary" onclick="window.print()">Imprimir / Salvar PDF</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+
+let points = [];
+let scalePxPerCm = null;
+let widthCm = null, heightCm = null;
+let stage = 'calib';
+
+let currentClient = '';
+let currentLabel = '';
+let projectItems = [];
+
+function loadClients() {
+  const clients = JSON.parse(localStorage.getItem('medidor_clients') || '[]');
+  const sel = document.getElementById('existingClients');
+  sel.innerHTML = '<option value="">— Novo cliente —</option>' +
+    clients.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+function saveClientIfNew(name) {
+  const clients = JSON.parse(localStorage.getItem('medidor_clients') || '[]');
+  if (!clients.includes(name)) {
+    clients.push(name);
+    localStorage.setItem('medidor_clients', JSON.stringify(clients));
+  }
+}
+function onClientSelectChange() {
+  const sel = document.getElementById('existingClients');
+  document.getElementById('newClientName').style.display = sel.value ? 'none' : 'block';
+  document.getElementById('newClientName').value = '';
+}
+loadClients();
+
+document.getElementById('refObject').addEventListener('change', (e) => {
+  document.getElementById('customRef').style.display = e.target.value === 'custom' ? 'block' : 'none';
+});
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    document.getElementById('startScreen').style.display = 'none';
+    resizeOverlay();
+  } catch (err) {
+    alert('Não consegui acessar a câmera: ' + err.message + '\n\nVerifique se está em HTTPS e se deu permissão.');
+  }
+}
+
+function resizeOverlay() {
+  overlay.width = overlay.clientWidth;
+  overlay.height = overlay.clientHeight;
+  draw();
+}
+window.addEventListener('resize', resizeOverlay);
+
+overlay.addEventListener('click', (e) => {
+  if (stage !== 'calib' && stage !== 'measureWidth' && stage !== 'measureHeight') return;
+  const rect = overlay.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  if (points.length >= 2) points = [];
+  points.push({x, y});
+  draw();
+  updateConfirmButtons();
+});
+
+function undoPoint() {
+  points.pop();
+  draw();
+  updateConfirmButtons();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  points.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 8, 0, Math.PI*2);
+    ctx.fillStyle = '#2563eb';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+  if (points.length === 2) {
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[1].x, points[1].y);
+    ctx.strokeStyle = '#60a5fa';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    const dist = pxDist(points[0], points[1]);
+    const midX = (points[0].x + points[1].x) / 2;
+    const midY = (points[0].y + points[1].y) / 2;
+    let label = dist.toFixed(0) + ' px';
+    if (scalePxPerCm) label = (dist / scalePxPerCm).toFixed(1) + ' cm';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(label, midX + 10, midY - 10);
+    ctx.fillText(label, midX + 10, midY - 10);
+  }
+}
+
+function pxDist(a, b) {
+  return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
+}
+
+function updateConfirmButtons() {
+  document.getElementById('confirmCalib').disabled = points.length !== 2;
+  document.getElementById('confirmMeasure').disabled = points.length !== 2;
+}
+
+function startMeasurement() {
+  const sel = document.getElementById('existingClients').value;
+  const newName = document.getElementById('newClientName').value.trim();
+  const name = sel || newName;
+  if (!name) { alert('Informe o nome do cliente.'); return; }
+  const label = document.getElementById('itemLabel').value.trim();
+  if (!label) { alert('Descreva o que vai medir (ex: Janela sala).'); return; }
+
+  currentClient = name;
+  currentLabel = label;
+  saveClientIfNew(name);
+
+  document.getElementById('clientBadge').textContent = '👤 ' + name;
+  document.getElementById('clientStep').style.display = 'none';
+  document.getElementById('calibStep').style.display = 'block';
+  stage = 'calib';
+  points = [];
+  draw();
+}
+
+function confirmCalibration() {
+  const sel = document.getElementById('refObject').value;
+  const refCm = sel === 'custom' ? parseFloat(document.getElementById('customRef').value) : parseFloat(sel);
+  if (!refCm || refCm <= 0) { alert('Informe a medida de referência.'); return; }
+  const dist = pxDist(points[0], points[1]);
+  scalePxPerCm = dist / refCm;
+  points = [];
+  draw();
+  stage = 'measureWidth';
+  document.getElementById('calibStep').style.display = 'none';
+  document.getElementById('measureStep').style.display = 'block';
+  document.getElementById('measureLabel').textContent = 'Etapa 2 · Marque a LARGURA (2 pontos)';
+  updateConfirmButtons();
+}
+
+function confirmMeasureStep() {
+  const dist = pxDist(points[0], points[1]) / scalePxPerCm;
+  if (stage === 'measureWidth') {
+    widthCm = dist;
+    points = [];
+    draw();
+    stage = 'measureHeight';
+    document.getElementById('measureLabel').textContent = 'Etapa 3 · Marque a ALTURA (2 pontos)';
+    updateConfirmButtons();
+  } else if (stage === 'measureHeight') {
+    heightCm = dist;
+    document.getElementById('measureStep').style.display = 'none';
+    document.getElementById('resultStep').style.display = 'block';
+    renderResults();
+  }
+}
+
+function renderResults() {
+  const tol = parseFloat(document.getElementById('tolerance').value);
+  document.getElementById('rWidth').textContent = widthCm.toFixed(1) + ' cm';
+  document.getElementById('rHeight').textContent = heightCm.toFixed(1) + ' cm';
+  document.getElementById('rArea').textContent = ((widthCm/100) * (heightCm/100)).toFixed(2) + ' m²';
+  document.getElementById('fWidth').textContent = (widthCm + tol).toFixed(1) + ' cm';
+  document.getElementById('fHeight').textContent = (heightCm + tol).toFixed(1) + ' cm';
+}
+
+function pushCurrentItem() {
+  const tol = parseFloat(document.getElementById('tolerance').value);
+  projectItems.push({
+    label: currentLabel,
+    widthCm: widthCm.toFixed(1),
+    heightCm: heightCm.toFixed(1),
+    areaM2: ((widthCm/100) * (heightCm/100)).toFixed(2),
+    toleranceCm: tol,
+    finalWidth: (widthCm + tol).toFixed(1),
+    finalHeight: (heightCm + tol).toFixed(1)
+  });
+}
+
+function saveItemAndMeasureAnother() {
+  pushCurrentItem();
+  widthCm = null; heightCm = null;
+  points = [];
+  scalePxPerCm = null;
+  stage = 'calib';
+  document.getElementById('resultStep').style.display = 'none';
+  document.getElementById('clientStep').style.display = 'block';
+  document.getElementById('itemLabel').value = '';
+  document.getElementById('existingClients').value = currentClient;
+  document.getElementById('newClientName').style.display = 'none';
+  draw();
+}
+
+function saveItemAndFinish() {
+  pushCurrentItem();
+  document.getElementById('resultStep').style.display = 'none';
+  document.getElementById('fichaStep').style.display = 'block';
+  document.getElementById('fichaClientName').textContent = 'Ficha de Medição — ' + currentClient;
+  document.getElementById('fichaDate').textContent = new Date().toLocaleDateString('pt-BR');
+  document.getElementById('fichaItems').innerHTML = projectItems.map(it => `
+    <div class="item-card">
+      <div class="title">${it.label}</div>
+      <div class="sub">Capturado: ${it.widthCm} × ${it.heightCm} cm — Área: ${it.areaM2} m²</div>
+      <div class="sub">Para orçamento (+${it.toleranceCm}cm): ${it.finalWidth} × ${it.finalHeight} cm</div>
+    </div>
+  `).join('');
+}
+
+function resetAll() {
+  points = [];
+  scalePxPerCm = null;
+  widthCm = null; heightCm = null;
+  currentClient = ''; currentLabel = '';
+  projectItems = [];
+  stage = 'calib';
+  document.getElementById('fichaStep').style.display = 'none';
+  document.getElementById('resultStep').style.display = 'none';
+  document.getElementById('measureStep').style.display = 'none';
+  document.getElementById('clientStep').style.display = 'block';
+  document.getElementById('clientBadge').textContent = '';
+  document.getElementById('itemLabel').value = '';
+  document.getElementById('newClientName').value = '';
+  document.getElementById('existingClients').value = '';
+  loadClients();
+  draw();
+}
+</script>
+</body>
+</html>
