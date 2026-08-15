@@ -20,14 +20,73 @@
     flex: 1;
     overflow: hidden;
     background: #000;
+    min-height: 280px;
   }
-  video, canvas#overlay {
+  video, img#capturedPhoto, canvas#overlay {
     position: absolute;
     top: 0; left: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
+  img#capturedPhoto { display: none; }
+  #detectCanvas { display: none; }
+
+  #captureBar {
+    position: absolute;
+    bottom: 24px;
+    left: 0; right: 0;
+    display: none;
+    justify-content: center;
+    z-index: 6;
+  }
+  #captureBtn {
+    width: 74px;
+    height: 74px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.95);
+    border: 5px solid #2563eb;
+    font-size: 32px;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #captureBtn:active { transform: scale(0.92); }
+
+  #retakeBtn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 6;
+    padding: 9px 16px;
+    border-radius: 22px;
+    background: rgba(15,23,42,0.8);
+    color: #f1f5f9;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid #475569;
+    cursor: pointer;
+    display: none;
+    backdrop-filter: blur(4px);
+  }
+
+  #flash {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 7;
+  }
+  #flash.active { animation: flashAnim 0.35s ease-out; }
+  @keyframes flashAnim {
+    0% { opacity: 0.85; }
+    100% { opacity: 0; }
+  }
+
   #ui {
     padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
     background: #111827;
@@ -45,23 +104,9 @@
     justify-content: space-between;
     align-items: center;
   }
-  #clientBadge {
-    font-size: 12px;
-    color: #93c5fd;
-    font-weight: 500;
-  }
-  .step-label {
-    font-size: 14px;
-    color: #93c5fd;
-    margin-bottom: 8px;
-    font-weight: 500;
-  }
-  .hint {
-    font-size: 12.5px;
-    color: #94a3b8;
-    margin-bottom: 12px;
-    line-height: 1.4;
-  }
+  #clientBadge { font-size: 12px; color: #93c5fd; font-weight: 500; }
+  .step-label { font-size: 14px; color: #93c5fd; margin-bottom: 8px; font-weight: 500; }
+  .hint { font-size: 12.5px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4; }
   select, input[type=number], input[type=text] {
     width: 100%;
     padding: 10px;
@@ -86,12 +131,7 @@
   .secondary { background: #334155; color: #f1f5f9; }
   .danger { background: #7f1d1d; color: #fecaca; }
   button:disabled { opacity: 0.4; }
-  .result-box {
-    background: #1e293b;
-    border-radius: 10px;
-    padding: 14px;
-    margin-bottom: 12px;
-  }
+  .result-box { background: #1e293b; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
   .result-row {
     display: flex;
     justify-content: space-between;
@@ -110,12 +150,15 @@
     margin-bottom: 12px;
     line-height: 1.4;
   }
-  .item-card {
+  .status-box {
     background: #1e293b;
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 12px;
-    margin-bottom: 8px;
+    font-size: 13.5px;
+    margin-bottom: 12px;
+    text-align: center;
   }
+  .item-card { background: #1e293b; border-radius: 10px; padding: 12px; margin-bottom: 8px; }
   .item-card .title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
   .item-card .sub { font-size: 12.5px; color: #94a3b8; }
   #startScreen {
@@ -153,10 +196,19 @@
 
 <div id="stage">
   <video id="video" autoplay playsinline muted></video>
+  <img id="capturedPhoto" alt="">
   <canvas id="overlay"></canvas>
+  <canvas id="detectCanvas"></canvas>
+  <div id="flash"></div>
+
+  <div id="captureBar">
+    <button id="captureBtn" onclick="capturePhoto()">📸</button>
+  </div>
+  <button id="retakeBtn" onclick="retakePhoto()">↩️ Tirar outra foto</button>
+
   <div id="startScreen">
     <div style="font-size:40px;">📷</div>
-    <p>Toque para ativar a câmera. Você vai calibrar com um objeto de tamanho conhecido antes de medir.</p>
+    <p>Toque para ativar a câmera. Você vai tirar uma <b>foto</b> da janela com a folha A4 ao lado e medir em cima dela.</p>
     <button class="primary" onclick="startCamera()">Ativar câmera</button>
   </div>
 </div>
@@ -174,9 +226,28 @@
     <button class="primary" onclick="startMeasurement()">Iniciar medição</button>
   </div>
 
+  <div id="captureHintStep" style="display:none;">
+    <div class="step-label">Etapa 1 · Foto</div>
+    <div class="hint">Enquadre a janela/porta com a folha A4 encostada ao lado, no mesmo plano. Toque no botão 📸.</div>
+  </div>
+
+  <!-- NOVO: etapa de detecção automática do A4 -->
+  <div id="autoDetectStep" style="display:none;">
+    <div class="step-label">Etapa 2 · Detectando a folha A4</div>
+    <div id="autoDetectStatus" class="status-box">Procurando...</div>
+    <div id="autoDetectActions" class="row" style="display:none;">
+      <button class="secondary" onclick="useManualCalibInstead()">Marcar manualmente</button>
+      <button class="primary" onclick="confirmAutoDetect()">Usar essa detecção</button>
+    </div>
+    <div id="autoDetectFailActions" class="row" style="display:none;">
+      <button class="secondary" onclick="runAutoDetect()">Tentar de novo</button>
+      <button class="primary" onclick="useManualCalibInstead()">Marcar manualmente</button>
+    </div>
+  </div>
+
   <div id="calibStep" style="display:none;">
-    <div class="step-label">Etapa 1 · Calibração</div>
-    <div class="hint">Encoste o objeto de referência na parede, ao lado do que vai medir (mesma distância da câmera). Escolha o objeto:</div>
+    <div class="step-label">Calibração manual</div>
+    <div class="hint">Toque nas duas pontas do objeto de referência na foto.</div>
     <select id="refObject">
       <option value="21">Folha A4 — largura (21 cm)</option>
       <option value="29.7">Folha A4 — altura (29,7 cm)</option>
@@ -184,7 +255,6 @@
       <option value="custom">Outro (informar medida)</option>
     </select>
     <input type="number" id="customRef" placeholder="Medida em cm" style="display:none;">
-    <div class="hint">Toque nas duas pontas do objeto na tela.</div>
     <div class="row">
       <button class="secondary" onclick="undoPoint()">Desfazer ponto</button>
       <button class="primary" id="confirmCalib" disabled onclick="confirmCalibration()">Confirmar calibração</button>
@@ -192,7 +262,7 @@
   </div>
 
   <div id="measureStep" style="display:none;">
-    <div class="step-label" id="measureLabel">Etapa 2 · Marque a LARGURA (2 pontos)</div>
+    <div class="step-label" id="measureLabel">Marque a LARGURA (2 pontos)</div>
     <div class="hint">Toque nas duas extremidades da medida que quer capturar.</div>
     <div class="row">
       <button class="secondary" onclick="undoPoint()">Desfazer ponto</button>
@@ -242,15 +312,28 @@
 const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
 const ctx = overlay.getContext('2d');
+const detectCanvas = document.getElementById('detectCanvas');
 
 let points = [];
 let scalePxPerCm = null;
 let widthCm = null, heightCm = null;
-let stage = 'calib';
+let stage = 'capture';
 
 let currentClient = '';
 let currentLabel = '';
 let projectItems = [];
+
+let cvReady = false;
+let autoQuadPoints = null; // 4 pontos {x,y} do A4 detectado, em coordenadas do overlay
+
+function onOpenCvReady() {
+  if (cv && cv['onRuntimeInitialized'] !== undefined) {
+    cv['onRuntimeInitialized'] = () => { cvReady = true; };
+  } else {
+    // fallback: algumas versões já vêm prontas no load
+    cvReady = true;
+  }
+}
 
 function loadClients() {
   const clients = JSON.parse(localStorage.getItem('medidor_clients') || '[]');
@@ -277,11 +360,17 @@ document.getElementById('refObject').addEventListener('change', (e) => {
 });
 
 async function startCamera() {
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
     });
     video.srcObject = stream;
+    video.style.display = 'block';
+    document.getElementById('capturedPhoto').style.display = 'none';
     document.getElementById('startScreen').style.display = 'none';
     resizeOverlay();
   } catch (err) {
@@ -295,6 +384,79 @@ function resizeOverlay() {
   draw();
 }
 window.addEventListener('resize', resizeOverlay);
+
+// Corrige o canvas sempre que o #stage mudar de tamanho de verdade
+// (acontece toda vez que o painel #ui embaixo cresce/encolhe entre etapas)
+const stageEl = document.getElementById('stage');
+new ResizeObserver(() => resizeOverlay()).observe(stageEl);
+
+/* ---------- CAPTURA DE FOTO ---------- */
+function showCaptureUI() {
+  document.getElementById('captureBar').style.display = 'flex';
+}
+function hideCaptureUI() {
+  document.getElementById('captureBar').style.display = 'none';
+}
+
+function capturePhoto() {
+  if (!video.srcObject || video.videoWidth === 0) return;
+
+  const flash = document.getElementById('flash');
+  flash.classList.remove('active');
+  void flash.offsetWidth;
+  flash.classList.add('active');
+
+  const img = document.getElementById('capturedPhoto');
+  const capCanvas = document.createElement('canvas');
+  capCanvas.width = video.videoWidth;
+  capCanvas.height = video.videoHeight;
+  capCanvas.getContext('2d').drawImage(video, 0, 0);
+  img.src = capCanvas.toDataURL('image/jpeg', 0.92);
+
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+  }
+
+  video.style.display = 'none';
+  img.style.display = 'block';
+
+  hideCaptureUI();
+  document.getElementById('retakeBtn').style.display = 'block';
+
+  document.getElementById('captureHintStep').style.display = 'none';
+
+  points = [];
+  autoQuadPoints = null;
+  scalePxPerCm = null;
+  draw();
+  resizeOverlay();
+
+  // aguarda a foto carregar de verdade antes de detectar
+  if (img.complete) {
+    goToAutoDetect();
+  } else {
+    img.onload = goToAutoDetect;
+  }
+}
+
+function retakePhoto() {
+  points = [];
+  scalePxPerCm = null;
+  autoQuadPoints = null;
+  draw();
+
+  document.getElementById('autoDetectStep').style.display = 'none';
+  document.getElementById('calibStep').style.display = 'none';
+  document.getElementById('measureStep').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = 'none';
+
+  startCamera();
+  showCaptureUI();
+  document.getElementById('captureHintStep').style.display = 'block';
+  stage = 'capture';
+}
+/* ------------------------------------- */
 
 overlay.addEventListener('click', (e) => {
   if (stage !== 'calib' && stage !== 'measureWidth' && stage !== 'measureHeight') return;
@@ -315,6 +477,11 @@ function undoPoint() {
 
 function draw() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  if (autoQuadPoints && (stage === 'autoDetect' || stage === 'measureWidth' || stage === 'measureHeight')) {
+    drawQuad(autoQuadPoints, '#22c55e', 'A4 (auto)');
+  }
+
   points.forEach(p => {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 8, 0, Math.PI*2);
@@ -345,6 +512,22 @@ function draw() {
   }
 }
 
+function drawQuad(pts, color, label) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText(label, pts[0].x, pts[0].y - 8);
+  ctx.fillText(label, pts[0].x, pts[0].y - 8);
+}
+
 function pxDist(a, b) {
   return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
 }
@@ -368,11 +551,177 @@ function startMeasurement() {
 
   document.getElementById('clientBadge').textContent = '👤 ' + name;
   document.getElementById('clientStep').style.display = 'none';
-  document.getElementById('calibStep').style.display = 'block';
-  stage = 'calib';
+
   points = [];
+  scalePxPerCm = null;
+  widthCm = null;
+  heightCm = null;
+  autoQuadPoints = null;
+  draw();
+
+  if (!video.srcObject) {
+    startCamera();
+  } else {
+    video.style.display = 'block';
+    document.getElementById('capturedPhoto').style.display = 'none';
+  }
+  showCaptureUI();
+  document.getElementById('captureHintStep').style.display = 'block';
+  stage = 'capture';
+}
+
+/* ---------- DETECÇÃO AUTOMÁTICA DO A4 ---------- */
+
+function goToAutoDetect() {
+  stage = 'autoDetect';
+  document.getElementById('autoDetectStep').style.display = 'block';
+  document.getElementById('autoDetectActions').style.display = 'none';
+  document.getElementById('autoDetectFailActions').style.display = 'none';
+  runAutoDetect();
+}
+
+// Desenha a imagem capturada num canvas do MESMO tamanho do overlay,
+// respeitando o mesmo recorte que object-fit:cover faz na tela —
+// assim as coordenadas detectadas batem exatamente com o espaço de clique manual.
+function drawCoverToCanvas(imageEl, natW, natH, outCanvas) {
+  const cw = outCanvas.width, ch = outCanvas.height;
+  const scale = Math.max(cw / natW, ch / natH);
+  const drawW = natW * scale, drawH = natH * scale;
+  const offsetX = (cw - drawW) / 2;
+  const offsetY = (ch - drawH) / 2;
+  const octx = outCanvas.getContext('2d');
+  octx.clearRect(0, 0, cw, ch);
+  octx.drawImage(imageEl, offsetX, offsetY, drawW, drawH);
+}
+
+function runAutoDetect() {
+  const statusEl = document.getElementById('autoDetectStatus');
+  document.getElementById('autoDetectActions').style.display = 'none';
+  document.getElementById('autoDetectFailActions').style.display = 'none';
+
+  if (typeof cv === 'undefined' || !cvReady) {
+    statusEl.textContent = 'Carregando motor de detecção (só na primeira vez, pode levar alguns segundos)...';
+    setTimeout(runAutoDetect, 500);
+    return;
+  }
+
+  statusEl.textContent = 'Procurando a folha A4 na foto...';
+
+  const img = document.getElementById('capturedPhoto');
+  detectCanvas.width = overlay.width;
+  detectCanvas.height = overlay.height;
+  drawCoverToCanvas(img, img.naturalWidth, img.naturalHeight, detectCanvas);
+
+  let quad = null;
+  try {
+    quad = detectA4Quad(detectCanvas);
+  } catch (e) {
+    console.error('Erro na detecção:', e);
+    quad = null;
+  }
+
+  if (quad) {
+    autoQuadPoints = quad.pts;
+    scalePxPerCm = quad.scalePxPerCm;
+    draw();
+    statusEl.textContent = '✅ Folha A4 detectada. Confira se o contorno verde está certo antes de confirmar.';
+    document.getElementById('autoDetectActions').style.display = 'flex';
+  } else {
+    autoQuadPoints = null;
+    scalePxPerCm = null;
+    statusEl.textContent = '⚠️ Não consegui detectar a folha A4 automaticamente nessa foto. Tente de novo com mais luz e a folha bem visível, ou marque manualmente.';
+    document.getElementById('autoDetectFailActions').style.display = 'flex';
+  }
+}
+
+// Procura, na imagem, um contorno de 4 lados com proporção parecida com A4 (21 x 29,7 cm ≈ 1:1,414)
+function detectA4Quad(canvasEl) {
+  const src = cv.imread(canvasEl);
+  const gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+
+  const edges = new cv.Mat();
+  cv.Canny(gray, edges, 50, 150);
+  const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+  cv.dilate(edges, edges, kernel);
+
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+  cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+  const imgArea = canvasEl.width * canvasEl.height;
+  const targetRatio = 29.7 / 21; // ~1.414
+  let best = null;
+  let bestArea = 0;
+
+  for (let i = 0; i < contours.size(); i++) {
+    const cnt = contours.get(i);
+    const peri = cv.arcLength(cnt, true);
+    const approx = new cv.Mat();
+    cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+
+    if (approx.rows === 4 && cv.isContourConvex(approx)) {
+      const area = Math.abs(cv.contourArea(approx));
+      if (area > imgArea * 0.03 && area < imgArea * 0.85) {
+        const pts = [];
+        for (let j = 0; j < 4; j++) {
+          pts.push({ x: approx.data32S[j * 2], y: approx.data32S[j * 2 + 1] });
+        }
+        const sides = [];
+        for (let j = 0; j < 4; j++) {
+          const p1 = pts[j], p2 = pts[(j + 1) % 4];
+          sides.push(Math.hypot(p2.x - p1.x, p2.y - p1.y));
+        }
+        const s1 = (sides[0] + sides[2]) / 2;
+        const s2 = (sides[1] + sides[3]) / 2;
+        const ratio = Math.max(s1, s2) / Math.min(s1, s2);
+        const ratioDiff = Math.abs(ratio - targetRatio);
+
+        if (ratioDiff < 0.25 && area > bestArea) {
+          bestArea = area;
+          const longPx = Math.max(s1, s2);
+          const shortPx = Math.min(s1, s2);
+          const scaleLong = longPx / 29.7;
+          const scaleShort = shortPx / 21;
+          best = {
+            pts,
+            scalePxPerCm: (scaleLong + scaleShort) / 2
+          };
+        }
+      }
+    }
+    approx.delete();
+    cnt.delete();
+  }
+
+  src.delete(); gray.delete(); edges.delete(); kernel.delete();
+  contours.delete(); hierarchy.delete();
+
+  return best;
+}
+
+function confirmAutoDetect() {
+  document.getElementById('autoDetectStep').style.display = 'none';
+  points = [];
+  stage = 'measureWidth';
+  document.getElementById('measureStep').style.display = 'block';
+  document.getElementById('measureLabel').textContent = 'Marque a LARGURA (2 pontos)';
+  updateConfirmButtons();
   draw();
 }
+
+function useManualCalibInstead() {
+  document.getElementById('autoDetectStep').style.display = 'none';
+  autoQuadPoints = null;
+  scalePxPerCm = null;
+  points = [];
+  stage = 'calib';
+  document.getElementById('calibStep').style.display = 'block';
+  draw();
+  updateConfirmButtons();
+}
+/* ------------------------------------------------ */
 
 function confirmCalibration() {
   const sel = document.getElementById('refObject').value;
@@ -385,7 +734,7 @@ function confirmCalibration() {
   stage = 'measureWidth';
   document.getElementById('calibStep').style.display = 'none';
   document.getElementById('measureStep').style.display = 'block';
-  document.getElementById('measureLabel').textContent = 'Etapa 2 · Marque a LARGURA (2 pontos)';
+  document.getElementById('measureLabel').textContent = 'Marque a LARGURA (2 pontos)';
   updateConfirmButtons();
 }
 
@@ -396,7 +745,7 @@ function confirmMeasureStep() {
     points = [];
     draw();
     stage = 'measureHeight';
-    document.getElementById('measureLabel').textContent = 'Etapa 3 · Marque a ALTURA (2 pontos)';
+    document.getElementById('measureLabel').textContent = 'Marque a ALTURA (2 pontos)';
     updateConfirmButtons();
   } else if (stage === 'measureHeight') {
     heightCm = dist;
@@ -428,17 +777,25 @@ function pushCurrentItem() {
   });
 }
 
+function clearStageForClient() {
+  document.getElementById('capturedPhoto').style.display = 'none';
+  document.getElementById('retakeBtn').style.display = 'none';
+  hideCaptureUI();
+}
+
 function saveItemAndMeasureAnother() {
   pushCurrentItem();
   widthCm = null; heightCm = null;
   points = [];
   scalePxPerCm = null;
-  stage = 'calib';
+  autoQuadPoints = null;
+  stage = 'capture';
   document.getElementById('resultStep').style.display = 'none';
   document.getElementById('clientStep').style.display = 'block';
   document.getElementById('itemLabel').value = '';
   document.getElementById('existingClients').value = currentClient;
   document.getElementById('newClientName').style.display = 'none';
+  clearStageForClient();
   draw();
 }
 
@@ -461,20 +818,28 @@ function resetAll() {
   points = [];
   scalePxPerCm = null;
   widthCm = null; heightCm = null;
+  autoQuadPoints = null;
   currentClient = ''; currentLabel = '';
   projectItems = [];
-  stage = 'calib';
+  stage = 'capture';
   document.getElementById('fichaStep').style.display = 'none';
   document.getElementById('resultStep').style.display = 'none';
   document.getElementById('measureStep').style.display = 'none';
+  document.getElementById('autoDetectStep').style.display = 'none';
+  document.getElementById('calibStep').style.display = 'none';
+  document.getElementById('captureHintStep').style.display = 'none';
   document.getElementById('clientStep').style.display = 'block';
   document.getElementById('clientBadge').textContent = '';
   document.getElementById('itemLabel').value = '';
   document.getElementById('newClientName').value = '';
   document.getElementById('existingClients').value = '';
+  clearStageForClient();
   loadClients();
   draw();
 }
 </script>
+
+<!-- OpenCV.js — usado só pra detectar automaticamente a folha A4 na foto -->
+<script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady();" onerror="document.getElementById('autoDetectStatus').textContent='⚠️ Não consegui carregar o motor de detecção (sem internet?). Use marcação manual.'; document.getElementById('autoDetectFailActions') && (document.getElementById('autoDetectFailActions').style.display='flex');"></script>
 </body>
 </html>
