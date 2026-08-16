@@ -29,6 +29,7 @@
     height: 100%;
     object-fit: cover;
   }
+  #overlay { touch-action: none; }
   img#capturedPhoto { display: none; }
   #detectCanvas { display: none; }
 
@@ -458,16 +459,53 @@ function retakePhoto() {
 }
 /* ------------------------------------- */
 
-overlay.addEventListener('click', (e) => {
-  if (stage !== 'calib' && stage !== 'measureWidth' && stage !== 'measureHeight') return;
+let draggingIndex = -1;
+const HIT_RADIUS = 24; // raio de toque pra "pegar" um ponto já colocado, em px
+
+function getCanvasCoords(e) {
   const rect = overlay.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+overlay.addEventListener('pointerdown', (e) => {
+  if (stage !== 'calib' && stage !== 'measureWidth' && stage !== 'measureHeight') return;
+  const p = getCanvasCoords(e);
+
+  // 1) tocou perto de um ponto já existente? pega ele pra arrastar
+  for (let i = 0; i < points.length; i++) {
+    if (pxDist(points[i], p) <= HIT_RADIUS) {
+      draggingIndex = i;
+      overlay.setPointerCapture(e.pointerId);
+      return;
+    }
+  }
+
+  // 2) já tem 2 pontos e tocou fora deles? reinicia a marcação
   if (points.length >= 2) points = [];
-  points.push({x, y});
+
+  // 3) cria o novo ponto exatamente onde tocou, e já deixa pronto pra arrastar
+  points.push(p);
+  draggingIndex = points.length - 1;
+  overlay.setPointerCapture(e.pointerId);
   draw();
   updateConfirmButtons();
 });
+
+overlay.addEventListener('pointermove', (e) => {
+  if (draggingIndex === -1) return;
+  points[draggingIndex] = getCanvasCoords(e);
+  draw();
+});
+
+overlay.addEventListener('pointerup', (e) => {
+  if (draggingIndex !== -1) {
+    try { overlay.releasePointerCapture(e.pointerId); } catch (err) {}
+  }
+  draggingIndex = -1;
+  updateConfirmButtons();
+});
+
+overlay.addEventListener('pointercancel', () => { draggingIndex = -1; });
 
 function undoPoint() {
   points.pop();
